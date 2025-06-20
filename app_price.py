@@ -4,6 +4,8 @@ import yfinance as yf
 import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+from datetime import datetime, timedelta, date
+import pandas as pd
 
 # ---------------------------
 # Fonctions Black-Scholes et Greeks
@@ -23,7 +25,6 @@ def call_payoff(S, K):
 def put_payoff(S, K):
     return np.maximum(K - S, 0)
 
-# Greeks (formule Black-Scholes)
 def delta(S, K, T, r, sigma, type='call'):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     if type == 'call':
@@ -53,7 +54,6 @@ st.title("🎯 Pricer & Visualiseur d'Options Européennes")
 
 # Choix du sous-jacent
 ticker_symbol = st.text_input("Ticker Yahoo Finance (ex : AAPL, MSFT, ^FCHI ...)", "AAPL")
-maturity = st.number_input("Maturité (en années)", min_value=0.01, max_value=5.0, value=1.0, step=0.01)
 
 with st.spinner("Chargement des données du marché..."):
     session = requests.Session(impersonate="chrome")
@@ -75,6 +75,28 @@ col2.metric("Volatilité annualisée", f"{vol*100:.2f} %")
 col3.metric("Taux sans risque (10Y)", f"{rfree*100:.2f} %")
 
 st.markdown("---")
+
+# --------- Sélecteur de date d'échéance ---------
+today = datetime.today().date()
+st.markdown("#### Choix de l'échéance")
+maturity_date = st.date_input(
+    "Date d’échéance (option européenne)",
+    value=today + timedelta(days=365),
+    min_value=today + timedelta(days=1)
+)
+days_to_maturity = (maturity_date - today).days
+T = max(days_to_maturity / 365, 1/365)  # Jamais zéro pour la division
+
+st.info(f"Nombre de jours jusqu'à échéance : **{days_to_maturity}** (soit {T:.2f} années)")
+
+st.markdown("---")
+
+# --------- Sélecteur du Greek à afficher ---------
+st.markdown("#### Visualiser une courbe :")
+greek_to_plot = st.selectbox(
+    "Sélectionne ce que tu veux afficher :",
+    ["Payoff", "Delta", "Gamma", "Vega", "Theta"]
+)
 
 # Table input pour les options du portefeuille
 st.subheader("Configuration de la stratégie")
@@ -98,12 +120,11 @@ for i in range(n_options):
 # Calculs & Affichage
 S_range = np.linspace(spot * 0.5, spot * 1.5, 200)
 payoff_total = np.zeros_like(S_range)
-payoff_labels = []
-fig, ax = plt.subplots(figsize=(10,5))
-
+greek_total = np.zeros_like(S_range)
 colors = ['b', 'g', 'r', 'm', 'y', 'c']
-
 results = []
+
+fig, ax = plt.subplots(figsize=(10,5))
 
 for idx in range(n_options):
     K = option_strikes[idx]
@@ -111,29 +132,64 @@ for idx in range(n_options):
     pos_ = option_pos[idx]
     qty = option_qty[idx]
 
-    prime = black_scholes(spot, K, maturity, rfree, vol, type=type_)
-    if type_ == 'call':
-        payoff = (call_payoff(S_range, K) - prime) * qty
+    prime = black_scholes(spot, K, T, rfree, vol, type=type_)
+    
+    # Pour chaque option, calcul du Greek ou du payoff sur toute la grille
+    if greek_to_plot == "Payoff":
+        if type_ == 'call':
+            payoff = (call_payoff(S_range, K) - prime) * qty
+        else:
+            payoff = (put_payoff(S_range, K) - prime) * qty
+        if pos_ == 'short':
+            payoff = -payoff
+        payoff_total += payoff
+        ax.plot(S_range, payoff, '--', label=f"{pos_} {type_} K={K} x{qty}", color=colors[idx % len(colors)])
     else:
-        payoff = (put_payoff(S_range, K) - prime) * qty
-    if pos_ == 'short':
-        payoff = -payoff
-        prime_display = f"+{prime:.2f}"
-        color_txt = "red"
-    else:
-        prime_display = f"-{prime:.2f}"
-        color_txt = "green"
+        if greek_to_plot == "Delta":
+            greek = delta(S_range, K, T, rfree, vol, type=type_)
+        elif greek_to_plot == "Gamma":
+            greek = gamma(S_range, K, T, rfree, vol)
+        elif greek_to_plot == "Vega":
+            greek = vega(S_range, K, T, rfree, vol)
+        elif greek_to_plot == "Theta":
+            greek = theta(S_range, K, T, rfree, vol, type=type_)
+        if pos_ == 'short':
+            greek = -greek * qty
+        else:
+            greek = greek * qty
+        greek_total += greek
+        ax.plot(S_range, greek, '--', label=f"{pos_} {type_} K={K} x{qty}", color=colors[idx % len(colors)])
 
-    payoff_total += payoff
-    ax.plot(S_range, payoff, '--', label=f"{pos_} {type_} K={K} x{qty}", color=colors[idx % len(colors)])
-    ax.annotate(f"Prime {prime_display}", xy=(K, 0), xytext=(K, np.max(payoff)*0.2),
-                arrowprops=dict(arrowstyle="->", color=color_txt), color=color_txt, fontsize=9, ha='center')
+# Tracer la courbe globale (stratégie) en noir
+if greek_to_plot == "Payoff":
+    ax.plot(S_range, payoff_total, label="Payoff total", linewidth=2, color='black')
+    ax.set_ylabel("Payoff (€)")
+else:
+    ax.plot(S_range, greek_total, label=f"{greek_to_plot} total", linewidth=2, color='black')
+    ax.set_ylabel(greek_to_plot)
 
-    # Calcul des Greeks au spot
-    d = delta(spot, K, maturity, rfree, vol, type=type_)
-    g = gamma(spot, K, maturity, rfree, vol)
-    v = vega(spot, K, maturity, rfree, vol)
-    t = theta(spot, K, maturity, rfree, vol, type=type_)
+ax.axhline(0, color='black', linewidth=0.7)
+ax.set_title(f"{greek_to_plot} de la stratégie")
+ax.set_xlabel("Spot à maturité")
+ax.legend()
+ax.grid(True)
+st.pyplot(fig)
+
+st.markdown("---")
+st.subheader("Tableau des résultats")
+
+# Calculs des greeks au spot pour le tableau
+for idx in range(n_options):
+    K = option_strikes[idx]
+    type_ = option_types[idx]
+    pos_ = option_pos[idx]
+    qty = option_qty[idx]
+
+    prime = black_scholes(spot, K, T, rfree, vol, type=type_)
+    d = delta(spot, K, T, rfree, vol, type=type_)
+    g = gamma(spot, K, T, rfree, vol)
+    v = vega(spot, K, T, rfree, vol)
+    t = theta(spot, K, T, rfree, vol, type=type_)
     if pos_ == 'short':
         d, g, v, t = -d*qty, -g*qty, -v*qty, -t*qty
     else:
@@ -148,25 +204,13 @@ for idx in range(n_options):
         "Gamma": round(g, 4),
         "Vega": round(v, 4),
         "Theta": round(t, 4),
-        "Quantité": qty
+        "Quantité": qty,
+        "Jours jusqu'à échéance": days_to_maturity
     })
 
-ax.plot(S_range, payoff_total, label="Payoff total", linewidth=2, color='black')
-ax.axhline(0, color='black', linewidth=0.7)
-ax.set_title("Payoff de la stratégie")
-ax.set_xlabel("Spot à maturité")
-ax.set_ylabel("Payoff (€)")
-ax.legend()
-ax.grid(True)
-st.pyplot(fig)
-
-st.markdown("---")
-st.subheader("Tableau des résultats")
 st.dataframe(results, hide_index=True)
 
 # Optionnel : télécharger les résultats
-import pandas as pd
 df = pd.DataFrame(results)
 csv = df.to_csv(index=False).encode('utf-8')
 st.download_button("Télécharger les résultats (CSV)", csv, "resultats_options.csv", "text/csv")
-
