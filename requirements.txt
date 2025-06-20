@@ -1,0 +1,7 @@
+streamlit
+yfinance
+curl_cffi
+numpy
+scipy
+matplotlib
+pandas
