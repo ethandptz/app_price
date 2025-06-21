@@ -55,11 +55,10 @@ st.title("🎯 Pricer & Visualiseur d'Options Européennes")
 
 # --------- Recherche intelligente du sous-jacent ---------
 st.subheader("Recherche de sous-jacent (par nom, secteur, ticker, etc.)")
-keyword = st.text_input("Tape un mot-clé ou un ticker (ex: 'oil', 'apple', 'BZ=F', 'MSFT', etc.)", "")
+keyword = st.text_input("Tape un mot-clé, un secteur ou un ticker (ex: 'oil', 'commodities', 'S&P500', 'apple', 'BZ=F', etc.)", "")
 
 session = requests.Session(impersonate="chrome")
 ticker_symbol = ""
-ticker_label = ""
 
 if keyword.strip():
     results = yq_search(keyword)
@@ -93,7 +92,6 @@ riskfree_dict = {
     "Germany 10Y (Bund)": "^DE10Y-GT",
     "LIBOR USD 3M": "^USD3MTD156N",
     "EURIBOR 3M": "EURIBOR3MD.EU"
-    # Ajoute d'autres si besoin
 }
 selected_rf = st.selectbox("Sélectionne le taux sans risque :", list(riskfree_dict.keys()))
 rf_ticker = riskfree_dict[selected_rf]
@@ -116,7 +114,7 @@ with st.spinner("Chargement des données du marché..."):
         rfree = 0.01
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Spot", f"{spot:.2f}", label=ticker_label)
+col1.metric("Spot", f"{spot:.2f}")
 col2.metric("Volatilité annualisée", f"{vol*100:.2f} %")
 col3.metric(selected_rf, f"{rfree*100:.2f} %")
 
