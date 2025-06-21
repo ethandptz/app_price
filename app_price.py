@@ -61,7 +61,8 @@ session = requests.Session(impersonate="chrome")
 ticker_symbol = ""
 
 if keyword.strip():
-    results = yq_search(keyword)
+    # Obtenir 50 résultats max pour être vraiment exhaustif :
+    results = yq_search(keyword, first_quote=0, quotes_count=20)
     if results and "quotes" in results:
         tickers = [
             f"{item.get('symbol', '')} — {item.get('shortname', '') or item.get('longname', '') or item.get('name', '') or ''}"
@@ -69,17 +70,20 @@ if keyword.strip():
             if "symbol" in item
         ]
         if tickers:
-            selected = st.selectbox("Choisis un sous-jacent :", tickers)
+            selected = st.selectbox("Choisis un sous-jacent :", tickers, key="sousjacent")
             ticker_symbol = selected.split(' — ')[0]
             ticker_label = selected
         else:
             st.warning("Aucun ticker trouvé pour ce mot-clé. Utilise un code Yahoo Finance.")
+            ticker_label = ""
     else:
         st.warning("Aucun résultat pour ce mot-clé. Utilise un code Yahoo Finance.")
+        ticker_label = ""
 else:
     ticker_symbol = st.text_input("Ticker Yahoo Finance (ex : AAPL, MSFT, ^FCHI ...)", "AAPL")
     ticker_label = ticker_symbol
 
+# Afficher le ticker sélectionné
 if not ticker_symbol:
     st.stop()
 
