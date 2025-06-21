@@ -6,6 +6,7 @@ from scipy.stats import norm
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta, date
 import pandas as pd
+from yahooquery import search as yq_search
 
 # ---------------------------
 # Fonctions Black-Scholes et Greeks
@@ -52,11 +53,52 @@ def theta(S, K, T, r, sigma, type='call'):
 st.set_page_config(page_title="Option Pricer Visual", layout="wide")
 st.title("🎯 Pricer & Visualiseur d'Options Européennes")
 
-# Choix du sous-jacent
-ticker_symbol = st.text_input("Ticker Yahoo Finance (ex : AAPL, MSFT, ^FCHI ...)", "AAPL")
+# --------- Recherche intelligente du sous-jacent ---------
+st.subheader("Recherche de sous-jacent (par nom, secteur, ticker, etc.)")
+keyword = st.text_input("Tape un mot-clé ou un ticker (ex: 'oil', 'apple', 'BZ=F', 'MSFT', etc.)", "")
+
+session = requests.Session(impersonate="chrome")
+ticker_symbol = ""
+ticker_label = ""
+
+if keyword.strip():
+    results = yq_search(keyword)
+    if results and "quotes" in results:
+        tickers = [
+            f"{item.get('symbol', '')} — {item.get('shortname', '') or item.get('longname', '') or item.get('name', '') or ''}"
+            for item in results["quotes"]
+            if "symbol" in item
+        ]
+        if tickers:
+            selected = st.selectbox("Choisis un sous-jacent :", tickers)
+            ticker_symbol = selected.split(' — ')[0]
+            ticker_label = selected
+        else:
+            st.warning("Aucun ticker trouvé pour ce mot-clé. Utilise un code Yahoo Finance.")
+    else:
+        st.warning("Aucun résultat pour ce mot-clé. Utilise un code Yahoo Finance.")
+else:
+    ticker_symbol = st.text_input("Ticker Yahoo Finance (ex : AAPL, MSFT, ^FCHI ...)", "AAPL")
+    ticker_label = ticker_symbol
+
+if not ticker_symbol:
+    st.stop()
+
+# --------- Choix du taux sans risque ---------
+st.subheader("Choix du taux sans risque")
+
+riskfree_dict = {
+    "US 10Y (OAT)": "^TNX",
+    "France 10Y (OAT)": "^FR10Y-GT",
+    "Germany 10Y (Bund)": "^DE10Y-GT",
+    "LIBOR USD 3M": "^USD3MTD156N",
+    "EURIBOR 3M": "EURIBOR3MD.EU"
+    # Ajoute d'autres si besoin
+}
+selected_rf = st.selectbox("Sélectionne le taux sans risque :", list(riskfree_dict.keys()))
+rf_ticker = riskfree_dict[selected_rf]
 
 with st.spinner("Chargement des données du marché..."):
-    session = requests.Session(impersonate="chrome")
     ticker = yf.Ticker(ticker_symbol, session=session)
     spot = ticker.history(period="1d")["Close"].iloc[-1]
     hist = ticker.history(period="1y")["Close"]
@@ -65,14 +107,18 @@ with st.spinner("Chargement des données du marché..."):
         div = ticker.dividends[-1]
     except:
         div = 0.0
-    # Taux sans risque 10Y US
-    riskfree_ticker = yf.Ticker("^TNX", session=session)
-    rfree = riskfree_ticker.history(period="1d")["Close"].iloc[-1] / 100
+
+    # Taux sans risque sélectionné
+    rf_data = yf.Ticker(rf_ticker, session=session)
+    try:
+        rfree = rf_data.history(period="1d")["Close"].iloc[-1] / 100
+    except:
+        rfree = 0.01
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Spot", f"{spot:.2f}")
+col1.metric("Spot", f"{spot:.2f}", label=ticker_label)
 col2.metric("Volatilité annualisée", f"{vol*100:.2f} %")
-col3.metric("Taux sans risque (10Y)", f"{rfree*100:.2f} %")
+col3.metric(selected_rf, f"{rfree*100:.2f} %")
 
 st.markdown("---")
 
